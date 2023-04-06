@@ -78,3 +78,9 @@
         poll: 5 
       
 ############# Clear Facts Data #############
+
+  - hosts: all
+    become: true
+    tasks: 
+     - name: Clear gathered facts from all currently targeted hosts
+       ansible.builtin.meta: clear_facts
