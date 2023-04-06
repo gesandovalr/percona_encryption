@@ -1,0 +1,80 @@
+############# Vault Agent Role #############
+  
+  - hosts: your-hostname-here
+    become: true
+    vars_files:
+      - group_vars/all.yaml
+        
+    roles:
+      - vault_agent
+
+############# Encryption Block #############
+  
+  - hosts: your-hostname-here
+    become: true
+    vars_files:
+      - group_vars/all.yaml
+      - group_vars/percona_info_vault.yml
+    
+    vars: 
+      source_file: /opt/vault/approle_token
+      destination_file: /var/lib/mysql-keyring/keyring_vault.conf
+      search_text: "token ="
+
+    roles:
+      - vault_agent
+       
+    tasks: 
+      - name: Mysql | ensure mysql service is stopped
+        shell: systemctl stop mysql
+        async: 1000
+        poll: 5 
+      
+      - name: Add J2 template for encryption
+        template:
+          src: templates/percona-node-01.cnf.j2
+          dest: "/etc/my.cnf"
+
+      - name: Add J2 template for keyring
+        template:
+          src: templates/keyring_vault.conf.j2
+          dest: "/var/lib/mysql-keyring/keyring_vault.conf"
+          owner: mysql
+          group: mysql
+          mode: '0644'
+      
+      - name: Add J2 template for Vault token rotation script
+        template:
+          src: templates/vault_token_rotation.sh.j2
+          dest: "/opt/vault/vault_token_rotation.sh"
+          mode: +x
+          
+      - name: System Daemon Reload
+        shell: systemctl daemon-reload
+
+      - name:  Ensure vault-agent service is started and approle_token is generated.
+        shell: systemctl start vault-agent
+        async: 1000
+        poll: 5
+      
+      - name: Get token
+        shell: "cat {{ source_file }}"
+        register: token
+
+      - name: Add Token Value on Keyring Conf File
+        lineinfile:
+          path: "{{ destination_file }}"
+          regexp: "{{ search_text }}"
+          line: "{{ search_text }} {{ token.stdout }}"
+          backup: yes
+          insertafter: yes
+
+      - name: restore context keyring_vault.conf file
+        shell: restorecon -v /var/lib/mysql-keyring/keyring_vault.conf
+
+      - name: Mysql | ensure mysql service is started
+        shell: systemctl start mysql
+        async: 1000
+        poll: 5 
+      
+############# Clear Facts Data #############
